@@ -3,13 +3,14 @@
 
     <head>
         <meta charset="UTF-8">
-        <title>TP3 - WebVR (Rotation Fluide Joystick Droit)</title>
-        <!-- Inclusion d'A-Frame et des scripts de physique/extras -->
+        <title>TP3 - WebVR (Grabbing & Physics)</title>
+        <!-- Inclusion d'A-Frame et des composants physiques, extras et super-hands pour le grab -->
         <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
         <script
             src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
         <script
             src="https://unpkg.com/aframe-physics-system@4.0.1/dist/aframe-physics-system.min.js"></script>
+        <script src="https://unpkg.com/super-hands@3.0.3/dist/super-hands.min.js"></script>
 
         <script>
             // Déplacement fluide avec le joystick gauche
@@ -54,13 +55,12 @@
                 tick: function (time, delta) {
                     if (Math.abs(this.xAxis) > 0.1) {
                         let rig = document.querySelector('#player');
-                        // Applique la rotation en fonction de l'inclinaison du joystick droit
                         rig.object3D.rotation.y -= this.xAxis * this.data.speed * (delta / 1000);
                     }
                 }
             });
 
-            // Composant de tir lié au bouton A de la manette droite[cite: 1]
+            // Composant de tir lié au bouton A de la manette droite
             AFRAME.registerComponent('vr-shooter', {
                 init: function () {
                     this.el.addEventListener('abuttondown', (evt) => {
@@ -106,7 +106,7 @@
 
         <a-scene physics="gravity: -9.8; debug: false">
 
-            <!-- Éclairage et Décor (Exercice 1)[cite: 1] -->
+            <!-- Éclairage et Décor -->
             <a-ambient-light color="#ffffff" intensity="0.5"></a-ambient-light>
             <a-directional-light position="2 6 -2" intensity="0.8"
                 cast-shadow="true"></a-directional-light>
@@ -117,13 +117,13 @@
             <a-box position="-2 0.5 -3" rotation="0 45 0" color="#4CC3D9" static-body></a-box>
             <a-sphere position="2 1 -4" radius="1" color="#EF2D5E" static-body></a-sphere>
 
-            <!-- Objets à attraper (Exercice 2)[cite: 1] -->
+            <!-- Objets configurés pour être saisis, suivis et soumis à la gravité -->
             <a-box position="0 1 -2" width="0.4" height="0.4" depth="0.4" color="#FFC65D"
-                dynamic-body grabbable></a-box>
+                dynamic-body grabbable hoverable></a-box>
             <a-box position="0.6 1 -2.2" width="0.4" height="0.4" depth="0.4" color="#F16745"
-                dynamic-body grabbable></a-box>
+                dynamic-body grabbable hoverable></a-box>
 
-            <!-- Cibles (Exercice 4)[cite: 1] -->
+            <!-- Cibles -->
             <a-entity id="targets-container">
                 <a-box class="target" position="-3 1.5 -5" width="0.8" height="0.8" depth="0.8"
                     color="#9b59b6" static-body></a-box>
@@ -131,14 +131,15 @@
                     color="#f1c40f" static-body></a-cone>
             </a-entity>
 
-            <!-- Rig Joueur et Contrôleurs VR (Exercice 1 & 3)[cite: 1] -->
+            <!-- Rig Joueur et Contrôleurs VR équipés de super-hands pour le Grab & Release -->
             <a-entity id="player" position="0 0 2">
                 <a-camera position="0 1.6 0"></a-camera>
-                <!-- Contrôleur gauche : déplacement -->
-                <a-entity oculus-touch-controls="hand: left" joystick-movement></a-entity>
-                <!-- Contrôleur droit : rotation fluide (joystick) et tir (bouton A) -->
-                <a-entity oculus-touch-controls="hand: right" joystick-rotation
-                    vr-shooter></a-entity>
+                <!-- Contrôleur gauche : Déplacement + Mains interactives -->
+                <a-entity oculus-touch-controls="hand: left" joystick-movement
+                    sphere-collider="objects: [grabbable]" super-hands></a-entity>
+                <!-- Contrôleur droit : Rotation joystick + Tir bouton A + Mains interactives -->
+                <a-entity oculus-touch-controls="hand: right" joystick-rotation vr-shooter
+                    sphere-collider="objects: [grabbable]" super-hands></a-entity>
             </a-entity>
 
         </a-scene>
