@@ -1,287 +1,190 @@
 <!DOCTYPE html>
 <html lang="fr">
 
-<head>
-    <meta charset="UTF-8">
-    <title>TP3 - WebVR (Grabbing, Arme & Cibles)</title>
-    <!-- Inclusion d'A-Frame et des composants physiques, extras et super-hands pour le grab -->
-    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
-    <script
-        src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
-    <script
-        src="https://unpkg.com/aframe-physics-system@4.0.1/dist/aframe-physics-system.min.js"></script>
-    <script src="https://unpkg.com/super-hands@3.0.3/dist/super-hands.min.js"></script>
+    <head>
+        <meta charset="UTF-8">
+        <title>TP3 - WebVR (Correction Joystick & Grab natif)</title>
+        <!-- Inclusion d'A-Frame et Physique uniquement (suppression de super-hands) -->
+        <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+        <script
+            src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
+        <script
+            src="https://unpkg.com/aframe-physics-system@4.0.1/dist/aframe-physics-system.min.js"></script>
 
-    <script>
-        // ---------- Exercice 1 : Déplacement fluide avec le joystick gauche ----------
-        AFRAME.registerComponent('joystick-movement', {
-            schema: { speed: { default: 0.05 } },
-            init: function () {
-                this.xAxis = 0;
-                this.yAxis = 0;
-                this.el.addEventListener('thumbstickmoved', (evt) => {
-                    this.xAxis = evt.detail.x;
-                    this.yAxis = evt.detail.y;
-                });
-            },
-            tick: function () {
-                if (Math.abs(this.xAxis) > 0.1 || Math.abs(this.yAxis) > 0.1) {
-                    let rig = document.querySelector('#player');
-                    let cameraEl = document.querySelector('a-camera');
+        <script>
+            // 1. Déplacement fluide avec le joystick gauche
+            AFRAME.registerComponent('joystick-movement', {
+                schema: { speed: { default: 0.05 } },
+                init: function () {
+                    this.xAxis = 0;
+                    this.yAxis = 0;
+                    this.el.addEventListener('thumbstickmoved', (evt) => {
+                        this.xAxis = evt.detail.x;
+                        this.yAxis = evt.detail.y;
+                    });
+                },
+                tick: function () {
+                    if (Math.abs(this.xAxis) > 0.1 || Math.abs(this.yAxis) > 0.1) {
+                        let rig = document.querySelector('#player');
+                        let cameraEl = document.querySelector('a-camera');
 
-                    let rotation = cameraEl.object3D.rotation.y;
+                        let rotation = cameraEl.object3D.rotation.y;
 
-                    let moveX = this.xAxis * this.data.speed;
-                    let moveZ = this.yAxis * this.data.speed;
+                        let moveX = this.xAxis * this.data.speed;
+                        let moveZ = this.yAxis * this.data.speed;
 
-                    let dirX = moveZ * Math.sin(rotation) + moveX * Math.cos(rotation);
-                    let dirZ = moveZ * Math.cos(rotation) - moveX * Math.sin(rotation);
+                        let dirX = moveZ * Math.sin(rotation) + moveX * Math.cos(rotation);
+                        let dirZ = moveZ * Math.cos(rotation) - moveX * Math.sin(rotation);
 
-                    rig.object3D.position.x += dirX;
-                    rig.object3D.position.z += dirZ;
-                }
-            }
-        });
-
-        // ---------- Exercice 1 : Rotation fluide de la caméra avec le joystick droit ----------
-        AFRAME.registerComponent('joystick-rotation', {
-            schema: { speed: { default: 2.5 } },
-            init: function () {
-                this.xAxis = 0;
-                this.el.addEventListener('thumbstickmoved', (evt) => {
-                    this.xAxis = evt.detail.x;
-                });
-            },
-            tick: function (time, delta) {
-                if (Math.abs(this.xAxis) > 0.1) {
-                    let rig = document.querySelector('#player');
-                    rig.object3D.rotation.y -= this.xAxis * this.data.speed * (delta / 1000);
-                }
-            }
-        });
-
-        // ---------- Exercice 4 : son d'impact généré (pas besoin de fichier audio externe) ----------
-        var audioCtx = null;
-        function playImpactSound() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-            var duration = 0.12;
-            var oscillator = audioCtx.createOscillator();
-            var gainNode = audioCtx.createGain();
-
-            oscillator.type = 'square';
-            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
-            oscillator.frequency.exponentialRampToValueAtTime(220, audioCtx.currentTime + duration);
-
-            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-
-            oscillator.start();
-            oscillator.stop(audioCtx.currentTime + duration);
-        }
-
-        // ---------- Exercice 3 : Arme (saisie au grip, tir à la gâchette) ----------
-        AFRAME.registerComponent('gun', {
-            schema: {
-                bulletSpeed: { default: 25 },
-                fireRate: { default: 250 } // ms minimum entre deux tirs
-            },
-            init: function () {
-                this.heldBy = null;
-                this.lastShot = 0;
-                this.onTriggerDown = this.onTriggerDown.bind(this);
-
-                // grab-start / grab-end sont émis par super-hands sur l'ENTITÉ SAISIE
-                // (ici l'arme), avec la main concernée dans evt.detail.hand
-                this.el.addEventListener('grab-start', (evt) => {
-                    this.heldBy = evt.detail.hand;
-                    this.heldBy.addEventListener('triggerdown', this.onTriggerDown);
-                });
-
-                this.el.addEventListener('grab-end', () => {
-                    if (this.heldBy) {
-                        this.heldBy.removeEventListener('triggerdown', this.onTriggerDown);
-                        this.heldBy = null;
+                        rig.object3D.position.x += dirX;
+                        rig.object3D.position.z += dirZ;
                     }
-                });
-            },
-            onTriggerDown: function () {
-                let now = performance.now();
-                if (now - this.lastShot < this.data.fireRate) { return; }
-                this.lastShot = now;
-                this.shoot();
-            },
-            shoot: function () {
-                let sceneEl = this.el.sceneEl;
-                let bullet = document.createElement('a-sphere');
+                }
+            });
 
-                // Position et orientation actuelles de l'arme dans le monde
-                let worldPos = new THREE.Vector3();
-                let worldQuat = new THREE.Quaternion();
-                this.el.object3D.getWorldPosition(worldPos);
-                this.el.object3D.getWorldQuaternion(worldQuat);
-
-                // Le canon pointe vers le -Z local de l'entité "gun"
-                let direction = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuat).normalize();
-                let muzzlePos = worldPos.clone().addScaledVector(direction, 0.25);
-
-                bullet.setAttribute('position', muzzlePos);
-                bullet.setAttribute('radius', '0.06');
-                bullet.setAttribute('color', '#FF3300');
-                bullet.setAttribute('shadow', '');
-                bullet.setAttribute('dynamic-body', 'shape: sphere; mass: 0.2');
-                bullet.classList.add('bullet');
-
-                sceneEl.appendChild(bullet);
-
-                let speed = this.data.bulletSpeed;
-                setTimeout(() => {
-                    if (bullet.body) {
-                        bullet.body.velocity.set(
-                            direction.x * speed,
-                            direction.y * speed,
-                            direction.z * speed
-                        );
+            // 2. Rotation fluide de la caméra avec le joystick droit
+            AFRAME.registerComponent('joystick-rotation', {
+                schema: { speed: { default: 2.5 } },
+                init: function () {
+                    this.xAxis = 0;
+                    this.el.addEventListener('thumbstickmoved', (evt) => {
+                        this.xAxis = evt.detail.x;
+                    });
+                },
+                tick: function (time, delta) {
+                    if (Math.abs(this.xAxis) > 0.1) {
+                        let rig = document.querySelector('#player');
+                        rig.object3D.rotation.y -= this.xAxis * this.data.speed * (delta / 1000);
                     }
-                }, 20);
+                }
+            });
 
-                // Exercice 4 : détection d'impact + son
-                bullet.addEventListener('collide', function (e) {
-                    let hitEl = e.detail.body.el;
-                    if (hitEl && hitEl.classList.contains('target')) {
-                        hitEl.setAttribute('color', '#00FF00');
-                        playImpactSound();
+            // 3. Tir lié au bouton A de la manette droite
+            AFRAME.registerComponent('vr-shooter', {
+                init: function () {
+                    this.el.addEventListener('abuttondown', (evt) => {
+                        let sceneEl = document.querySelector('a-scene');
+                        let bullet = document.createElement('a-sphere');
+
+                        let worldPos = new THREE.Vector3();
+                        this.el.object3D.getWorldPosition(worldPos);
+
+                        bullet.setAttribute('position', worldPos);
+                        bullet.setAttribute('radius', '0.08');
+                        bullet.setAttribute('color', '#FF0000');
+                        bullet.setAttribute('dynamic-body', '');
+
+                        sceneEl.appendChild(bullet);
+
+                        let direction = new THREE.Vector3(0, 0, -1);
+                        direction.applyQuaternion(this.el.object3D.quaternion);
+                        direction.multiplyScalar(20);
+
                         setTimeout(() => {
-                            if (hitEl.parentNode) { hitEl.parentNode.removeChild(hitEl); }
-                        }, 200);
-                    }
-                });
+                            if (bullet.body) {
+                                bullet.body.velocity.set(direction.x, direction.y, direction.z);
+                            }
+                        }, 10);
 
-                // Nettoyage : la balle disparaît après 5s si elle n'a rien touché
-                setTimeout(() => {
-                    if (bullet.parentNode) { bullet.parentNode.removeChild(bullet); }
-                }, 5000);
-            }
-        });
-
-        // ---------- Exercice 4 : génération aléatoire de cibles ----------
-        AFRAME.registerComponent('target-spawner', {
-            schema: {
-                interval: { default: 4000 },   // délai entre deux apparitions (ms)
-                lifespan: { default: 15000 },  // durée de vie d'une cible non touchée
-                maxTargets: { default: 6 }     // nombre max de cibles simultanées
-            },
-            init: function () {
-                this.spawnTarget = this.spawnTarget.bind(this);
-                this.spawnTimer = setInterval(this.spawnTarget, this.data.interval);
-            },
-            remove: function () {
-                clearInterval(this.spawnTimer);
-            },
-            spawnTarget: function () {
-                let container = this.el;
-                let activeTargets = container.querySelectorAll('.target').length;
-                if (activeTargets >= this.data.maxTargets) { return; }
-
-                let shapes = ['a-box', 'a-cone', 'a-cylinder'];
-                let colors = ['#9b59b6', '#f1c40f', '#3498db', '#e74c3c', '#1abc9c'];
-                let tag = shapes[Math.floor(Math.random() * shapes.length)];
-                let color = colors[Math.floor(Math.random() * colors.length)];
-
-                let x = (Math.random() * 8) - 4;    // -4 à 4
-                let y = 1 + Math.random() * 2;      // 1 à 3
-                let z = -5 - Math.random() * 3;     // -5 à -8
-
-                let target = document.createElement(tag);
-                target.classList.add('target');
-                target.setAttribute('position', `${x.toFixed(2)} ${y.toFixed(2)} ${z.toFixed(2)}`);
-                target.setAttribute('color', color);
-                target.setAttribute('static-body', '');
-                target.setAttribute('shadow', '');
-
-                if (tag === 'a-box') {
-                    target.setAttribute('width', '0.7');
-                    target.setAttribute('height', '0.7');
-                    target.setAttribute('depth', '0.7');
-                } else if (tag === 'a-cone') {
-                    target.setAttribute('radius-bottom', '0.4');
-                    target.setAttribute('height', '0.9');
-                } else {
-                    target.setAttribute('radius', '0.4');
-                    target.setAttribute('height', '0.9');
+                        bullet.addEventListener('collide', function (e) {
+                            let hitEl = e.detail.body.el;
+                            if (hitEl && hitEl.classList.contains('target')) {
+                                hitEl.setAttribute('color', '#00FF00');
+                                setTimeout(() => {
+                                    hitEl.parentNode.removeChild(hitEl);
+                                }, 200);
+                            }
+                        });
+                    });
                 }
+            });
 
-                container.appendChild(target);
+            // 4. Nouveau système de Grab (Saisie) 100% natif
+            AFRAME.registerComponent('vr-grab', {
+                init: function () {
+                    this.grabbedEl = null;
 
-                setTimeout(() => {
-                    if (target.parentNode) { target.parentNode.removeChild(target); }
-                }, this.data.lifespan);
-            }
-        });
-    </script>
-</head>
+                    // Quand on appuie sur le bouton Grip (Saisir)
+                    this.el.addEventListener('gripdown', () => {
+                        let raycaster = this.el.components.raycaster;
+                        let intersectedEls = raycaster.intersectedEls;
 
-<body>
+                        if (intersectedEls.length > 0) {
+                            this.grabbedEl = intersectedEls[0];
+                            // Désactive la gravité pendant la prise en main
+                            this.grabbedEl.removeAttribute('dynamic-body');
+                            // Attache l'objet à la main
+                            this.grabbedEl.object3D.parent = this.el.object3D;
+                            this.grabbedEl.object3D.position.set(0, 0, -0.05);
+                        }
+                    });
 
-    <a-scene physics="gravity: -9.8; debug: false">
+                    // Quand on relâche le bouton Grip (Lâcher)
+                    this.el.addEventListener('gripup', () => {
+                        if (this.grabbedEl) {
+                            // Calcule la position réelle dans l'espace
+                            let worldPos = new THREE.Vector3();
+                            this.grabbedEl.object3D.getWorldPosition(worldPos);
 
-        <!-- Éclairage et Décor -->
-        <a-ambient-light color="#ffffff" intensity="0.5"></a-ambient-light>
-        <a-directional-light position="2 6 -2" intensity="0.8" cast-shadow="true"></a-directional-light>
+                            // Détache de la main et remet dans la scène
+                            let sceneEl = document.querySelector('a-scene');
+                            this.grabbedEl.object3D.parent = sceneEl.object3D;
+                            this.grabbedEl.setAttribute('position', worldPos);
 
-        <a-plane position="0 0 -4" rotation="-90 0 0" width="20" height="20" color="#7BC8A4" static-body
-            shadow="cast: false; receive: true"></a-plane>
+                            // Réactive la gravité pour que l'objet tombe
+                            this.grabbedEl.setAttribute('dynamic-body', '');
+                            this.grabbedEl = null;
+                        }
+                    });
+                }
+            });
+        </script>
+    </head>
 
-        <a-box position="-2 0.5 -3" rotation="0 45 0" color="#4CC3D9" static-body shadow></a-box>
-        <a-sphere position="2 1 -4" radius="1" color="#EF2D5E" static-body shadow></a-sphere>
+    <body>
 
-        <!-- Objets configurés pour être saisis, suivis et soumis à la gravité -->
-        <a-box position="0 1 -2" width="0.4" height="0.4" depth="0.4" color="#FFC65D"
-            dynamic-body grabbable hoverable shadow></a-box>
-        <a-box position="0.6 1 -2.2" width="0.4" height="0.4" depth="0.4" color="#F16745"
-            dynamic-body grabbable hoverable shadow></a-box>
+        <a-scene physics="gravity: -9.8; debug: false">
 
-        <!-- Exercice 3 : arme saisie au bouton grip, tir à la gâchette -->
-        <a-entity id="gun" gun position="1.3 1 -1" rotation="0 0 0"
-            dynamic-body="shape: box; mass: 0.5"
-            grabbable="startButtons: gripdown; endButtons: gripup" hoverable>
-            <!-- Corps -->
-            <a-box position="0 0 0" width="0.06" height="0.09" depth="0.24" color="#2b2b2b" shadow></a-box>
-            <!-- Canon -->
-            <a-box position="0 0.02 -0.19" width="0.03" height="0.03" depth="0.16" color="#111111" shadow></a-box>
-            <!-- Poignée -->
-            <a-box position="0 -0.1 0.06" width="0.05" height="0.15" depth="0.06" rotation="15 0 0"
-                color="#2b2b2b" shadow></a-box>
-        </a-entity>
+            <!-- Éclairage et Décor -->
+            <a-ambient-light color="#ffffff" intensity="0.5"></a-ambient-light>
+            <a-directional-light position="2 6 -2" intensity="0.8"
+                cast-shadow="true"></a-directional-light>
 
-        <!-- Exercice 4 : cibles (2 fixes au départ + génération aléatoire par target-spawner) -->
-        <a-entity id="targets-container" target-spawner="interval: 4000; lifespan: 15000; maxTargets: 6">
-            <a-box class="target" position="-3 1.5 -5" width="0.8" height="0.8" depth="0.8" color="#9b59b6"
-                static-body shadow></a-box>
-            <a-cone class="target" position="3 1.5 -5" radius-bottom="0.5" height="1" color="#f1c40f"
-                static-body shadow></a-cone>
-        </a-entity>
+            <a-plane position="0 0 -4" rotation="-90 0 0" width="20" height="20" color="#7BC8A4"
+                static-body></a-plane>
 
-        <!-- Rig Joueur et Contrôleurs VR équipés de super-hands pour le Grab & Release -->
-        <a-entity id="player" position="0 0 2">
-            <a-camera position="0 1.6 0"></a-camera>
-            <!-- Contrôleur gauche : Déplacement + Mains interactives -->
-            <a-entity oculus-touch-controls="hand: left" joystick-movement
-                sphere-collider="objects: [grabbable]" super-hands></a-entity>
-            <!-- Contrôleur droit : Rotation joystick + Mains interactives (saisie arme + gâchette) -->
-            <a-entity oculus-touch-controls="hand: right" joystick-rotation
-                sphere-collider="objects: [grabbable]" super-hands></a-entity>
-        </a-entity>
+            <a-box position="-2 0.5 -3" rotation="0 45 0" color="#4CC3D9" static-body></a-box>
+            <a-sphere position="2 1 -4" radius="1" color="#EF2D5E" static-body></a-sphere>
 
-    </a-scene>
+            <!-- Objets configurés pour être saisis (ajout de class="grabbable") -->
+            <a-box class="grabbable" position="0 1 -2" width="0.4" height="0.4" depth="0.4"
+                color="#FFC65D" dynamic-body></a-box>
+            <a-box class="grabbable" position="0.6 1 -2.2" width="0.4" height="0.4" depth="0.4"
+                color="#F16745" dynamic-body></a-box>
 
-</body>
+            <!-- Cibles (class="target") -->
+            <a-entity id="targets-container">
+                <a-box class="target" position="-3 1.5 -5" width="0.8" height="0.8" depth="0.8"
+                    color="#9b59b6" static-body></a-box>
+                <a-cone class="target" position="3 1.5 -5" radius-bottom="0.5" height="1"
+                    color="#f1c40f" static-body></a-cone>
+            </a-entity>
+
+            <!-- Rig Joueur et Contrôleurs VR -->
+            <a-entity id="player" position="0 0 2">
+                <a-camera position="0 1.6 0"></a-camera>
+
+                <!-- Contrôleur gauche : Déplacement joystick + Grab (raycaster très court pour simuler la main) -->
+                <a-entity oculus-touch-controls="hand: left" joystick-movement vr-grab
+                    raycaster="objects: .grabbable; far: 2; showLine: true"></a-entity>
+
+                <!-- Contrôleur droit : Rotation joystick + Tir bouton A + Grab -->
+                <a-entity oculus-touch-controls="hand: right" joystick-rotation vr-shooter vr-grab
+                    raycaster="objects: .grabbable; far: 2; showLine: true"></a-entity>
+            </a-entity>
+
+        </a-scene>
+
+    </body>
 
 </html>
