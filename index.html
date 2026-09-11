@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+    <head>
+        <meta charset="UTF-8">
+        <title>ST2AWD - TP 03 - Exercice 4 : Cibles et Effets</title>
+        <!-- Inclusion d'A-Frame -->
+        <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+        <!-- Inclusion de la physique -->
+        <script
+            src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-physics-system@v4.0.1/dist/aframe-physics-system.min.js"></script>
+        <!-- Inclusion de Super-Hands -->
+        <script src="https://unpkg.com/super-hands@3.0.3/dist/aframe-super-hands.min.js"></script>
+
+        <script>
+            // Fonction audio pour simuler un impact de cloche/hit sans dépendance externe
+            function playHitSound() {
+                try {
+                    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // Note D5
+                    osc.frequency.exponentialRampToValueAtTime(146.83, audioCtx.currentTime + 0.2);
+                    gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.2);
+                } catch (e) { }
+            }
+
+            // Composant de l'arme (Tir de projectiles)
+            AFRAME.registerComponent('weapon-shooter', {
+                init: function () {
+                    this.el.addEventListener('click', () => { this.shoot(); });
+                    this.el.addEventListener('triggerdown', () => { this.shoot(); });
+                },
+                shoot: function () {
+                    const scene = document.querySelector('a-scene');
+                    const bullet = document.createElement('a-sphere');
+
+                    const worldPos = new THREE.Vector3();
+                    this.el.object3D.getWorldPosition(worldPos);
+
+                    bullet.setAttribute('radius', '0.04');
+                    bullet.setAttribute('color', 'yellow');
+                    bullet.setAttribute('position', worldPos);
+                    bullet.setAttribute('dynamic-body', 'shape: sphere; mass: 0.1');
+                    bullet.setAttribute('shadow', 'cast: true');
+
+                    scene.appendChild(bullet);
+
+                    bullet.addEventListener('body-loaded', () => {
+                        const body = bullet.body;
+                        const worldDir = new THREE.Vector3(0, 0, -1);
+                        worldDir.applyQuaternion(this.el.object3D.getWorldQuaternion(new THREE.Quaternion()));
+                        worldDir.multiplyScalar(25);
+                        body.velocity.set(worldDir.x, worldDir.y, worldDir.z);
+                    });
+
+                    setTimeout(() => {
+                        if (bullet.parentNode) bullet.parentNode.removeChild(bullet);
+                    }, 4000);
+                }
+            });
+
+            // Composant pour générer et gérer les cibles aléatoires
+            AFRAME.registerComponent('target-spawner', {
+                init: function () {
+                    this.scene = document.querySelector('a-scene');
+                    // Génère une nouvelle cible toutes les 4 secondes
+                    setInterval(() => {
+                        this.spawnTarget();
+                    }, 4000);
+                },
+                spawnTarget: function () {
+                    const types = ['box', 'cone', 'cylinder'];
+                    const type = types[Math.floor(Math.random() * types.length)];
+                    const target = document.createElement(`a-${type}`);
+
+                    const x = (Math.random() - 0.5) * 8;
+                    const z = -4 - Math.random() * 4;
+                    const y = 1 + Math.random() * 2;
+
+                    target.setAttribute('position', `${x} ${y} ${z}`);
+                    target.setAttribute('dynamic-body', '');
+                    target.setAttribute('class', 'target');
+                    target.setAttribute('shadow', 'cast: true; receive: true');
+
+                    if (type === 'box') {
+                        target.setAttribute('width', '0.8');
+                        target.setAttribute('height', '0.8');
+                        target.setAttribute('depth', '0.8');
+                        target.setAttribute('color', '#E63946');
+                    } else if (type === 'cone') {
+                        target.setAttribute('radius-bottom', '0.5');
+                        target.setAttribute('height', '1');
+                        target.setAttribute('color', '#F4A261');
+                    } else {
+                        target.setAttribute('radius', '0.4');
+                        target.setAttribute('height', '1');
+                        target.setAttribute('color', '#2A9D8F');
+                    }
+
+                    // Détection de l'impact avec le projectile
+                    target.addEventListener('collide', (e) => {
+                        if (e.detail.body.el && e.detail.body.el.getAttribute('color') === 'yellow') {
+                            playHitSound();
+                            setTimeout(() => {
+                                if (target.parentNode) target.parentNode.removeChild(target);
+                            }, 50);
+                        }
+                    });
+
+                    this.scene.appendChild(target);
+                }
+            });
+        </script>
+    </head>
+
+    <body target-spawner>
+        <a-scene physics="gravity: -9.8" shadow="type: pcfsoft">
+
+            <!-- ========================================== -->
+            <!-- 1. ENVIRONNEMENT ET LUMIÈRES               -->
+            <!-- ========================================== -->
+            <a-light type="ambient" color="#BBB"></a-light>
+            <a-light type="directional" color="#FFF" intensity="0.8" position="-2 4 2"
+                cast-shadow="true" target="#direction-target"></a-light>
+            <a-entity id="direction-target" position="0 0 0"></a-entity>
+
+            <a-plane position="0 0 0" rotation="-90 0 0" width="30" height="30" color="#7BC8A4"
+                static-body shadow="receive: true"></a-plane>
+
+            <!-- ========================================== -->
+            <!-- 2. ARME INTERACTIVE                        -->
+            <!-- ========================================== -->
+            <a-entity id="my-weapon" position="0 1.5 -2" dynamic-body grabbable weapon-shooter
+                shadow="cast: true">
+                <a-cylinder position="0 0 -0.2" rotation="90 0 0" radius="0.03" height="0.4"
+                    color="#333"></a-cylinder>
+                <a-box position="0 -0.1 0" width="0.08" height="0.2" depth="0.15"
+                    color="#555"></a-box>
+            </a-entity>
+
+            <!-- ========================================== -->
+            <!-- 3. RIG JOUEUR ET CONTRÔLEURS               -->
+            <!-- ========================================== -->
+            <a-entity id="player-rig" position="0 0 2">
+                <a-camera position="0 1.6 0" look-controls="pointerLockEnabled: false">
+                    <a-cursor></a-cursor>
+                </a-camera>
+
+                <a-entity laser-controls="hand: left" oculus-touch-controls="hand: left"
+                    movement-controls="camera: [a-camera]"
+                    sphere-collider="objects: [grabbable]; radius: 0.1" super-hands>
+                </a-entity>
+
+                <a-entity laser-controls="hand: right" oculus-touch-controls="hand: right"
+                    smooth-turn sphere-collider="objects: [grabbable]; radius: 0.1" super-hands>
+                </a-entity>
+
+                <a-entity raycaster="objects: [grabbable]" cursor="rayOrigin: mouse"
+                    super-hands></a-entity>
+            </a-entity>
+
+        </a-scene>
+    </body>
+
+</html>
