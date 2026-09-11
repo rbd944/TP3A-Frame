@@ -3,7 +3,7 @@
 
     <head>
         <meta charset="UTF-8">
-        <title>TP3 - WebVR (Laser & Hitbox corrigés)</title>
+        <title>TP3 - WebVR (Gravité & Collisions du Joueur)</title>
         <!-- Inclusion d'A-Frame et Physique -->
         <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
         <script
@@ -12,9 +12,20 @@
             src="https://unpkg.com/aframe-physics-system@4.0.1/dist/aframe-physics-system.min.js"></script>
 
         <script>
-            // 1. Déplacement (Joystick gauche)
+            // 1. Anti-basculement pour le joueur (évite de tomber à la renverse)
+            AFRAME.registerComponent('player-physics', {
+                init: function () {
+                    this.el.addEventListener('body-loaded', () => {
+                        // Bloque la rotation de la hitbox pour rester toujours droit
+                        this.el.body.fixedRotation = true;
+                        this.el.body.updateMassProperties();
+                    });
+                }
+            });
+
+            // 2. Déplacement physique (Joystick gauche)
             AFRAME.registerComponent('joystick-movement', {
-                schema: { speed: { default: 0.05 } },
+                schema: { speed: { default: 3.5 } }, // Vitesse augmentée pour la vélocité physique
                 init: function () {
                     this.xAxis = 0;
                     this.yAxis = 0;
@@ -24,23 +35,37 @@
                     });
                 },
                 tick: function () {
+                    let rig = document.querySelector('#player');
+                    if (!rig.body) return; // Attend que la physique soit active
+
+                    let cameraEl = document.querySelector('a-camera');
+
+                    // On récupère la rotation de la tête et celle du corps (joystick droit)
+                    let rotation = cameraEl.object3D.rotation.y;
+                    let rigQuat = new THREE.Quaternion();
+                    rig.object3D.getWorldQuaternion(rigQuat);
+                    let rigEuler = new THREE.Euler().setFromQuaternion(rigQuat, 'YXZ');
+                    let totalRotation = rotation + rigEuler.y;
+
                     if (Math.abs(this.xAxis) > 0.1 || Math.abs(this.yAxis) > 0.1) {
-                        let rig = document.querySelector('#player');
-                        let cameraEl = document.querySelector('a-camera');
-                        let rotation = cameraEl.object3D.rotation.y;
                         let moveX = this.xAxis * this.data.speed;
                         let moveZ = this.yAxis * this.data.speed;
-                        let dirX = moveZ * Math.sin(rotation) + moveX * Math.cos(rotation);
-                        let dirZ = moveZ * Math.cos(rotation) - moveX * Math.sin(rotation);
-                        rig.object3D.position.x += dirX;
-                        rig.object3D.position.z += dirZ;
+
+                        let velX = moveZ * Math.sin(totalRotation) + moveX * Math.cos(totalRotation);
+                        let velZ = moveZ * Math.cos(totalRotation) - moveX * Math.sin(totalRotation);
+
+                        // Applique la vitesse tout en conservant la gravité (vélocité Y)
+                        rig.body.velocity.set(velX, rig.body.velocity.y, velZ);
+                    } else {
+                        // Arrêt des mouvements (friction) mais la gravité Y reste active
+                        rig.body.velocity.set(0, rig.body.velocity.y, 0);
                     }
                 }
             });
 
-            // 2. Rotation (Joystick droit)
+            // 3. Rotation physique (Joystick droit)
             AFRAME.registerComponent('joystick-rotation', {
-                schema: { speed: { default: 2.5 } },
+                schema: { speed: { default: 1.5 } },
                 init: function () {
                     this.xAxis = 0;
                     this.el.addEventListener('thumbstickmoved', (evt) => {
@@ -48,14 +73,21 @@
                     });
                 },
                 tick: function (time, delta) {
-                    if (Math.abs(this.xAxis) > 0.1) {
-                        let rig = document.querySelector('#player');
-                        rig.object3D.rotation.y -= this.xAxis * this.data.speed * (delta / 1000);
+                    let rig = document.querySelector('#player');
+                    if (Math.abs(this.xAxis) > 0.1 && rig.body) {
+                        let yRotation = -this.xAxis * this.data.speed * (delta / 1000);
+                        let quat = new THREE.Quaternion();
+                        quat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yRotation);
+
+                        // Modifie directement le quaternion de Cannon.js
+                        let curQuat = new THREE.Quaternion(rig.body.quaternion.x, rig.body.quaternion.y, rig.body.quaternion.z, rig.body.quaternion.w);
+                        curQuat.multiplyQuaternions(curQuat, quat);
+                        rig.body.quaternion.set(curQuat.x, curQuat.y, curQuat.z, curQuat.w);
                     }
                 }
             });
 
-            // 3. Tir (Bouton A)
+            // 4. Tir (Bouton A)
             AFRAME.registerComponent('vr-shooter', {
                 init: function () {
                     this.el.addEventListener('abuttondown', (evt) => {
@@ -67,7 +99,7 @@
                         bullet.setAttribute('position', worldPos);
                         bullet.setAttribute('radius', '0.08');
                         bullet.setAttribute('color', '#FF0000');
-                        bullet.setAttribute('dynamic-body', '');
+                        bullet.setAttribute('dynamic-body', 'mass: 0.5'); // Masse faible pour ne pas propulser le joueur s'il tire à ses pieds
                         sceneEl.appendChild(bullet);
 
                         let direction = new THREE.Vector3(0, 0, -1);
@@ -75,9 +107,7 @@
                         direction.multiplyScalar(20);
 
                         setTimeout(() => {
-                            if (bullet.body) {
-                                bullet.body.velocity.set(direction.x, direction.y, direction.z);
-                            }
+                            if (bullet.body) bullet.body.velocity.set(direction.x, direction.y, direction.z);
                         }, 10);
 
                         bullet.addEventListener('collide', function (e) {
@@ -91,42 +121,29 @@
                 }
             });
 
-            // 4. Grab avec conservation de la hitbox (Bouton Grip)
+            // 5. Grab (Bouton Grip)
             AFRAME.registerComponent('vr-grab', {
                 init: function () {
                     this.grabbedEl = null;
-
                     this.el.addEventListener('gripdown', () => {
                         let raycaster = this.el.components.raycaster;
-                        if (!raycaster) return;
+                        if (!raycaster || raycaster.intersectedEls.length === 0) return;
 
-                        let intersectedEls = raycaster.intersectedEls;
-                        if (intersectedEls.length > 0) {
-                            this.grabbedEl = intersectedEls[0];
-
-                            // Enlève la gravité pour le tenir
-                            this.grabbedEl.removeAttribute('dynamic-body');
-
-                            // L'attache proprement au contrôleur via le DOM pour garder la hitbox intacte
-                            this.el.appendChild(this.grabbedEl);
-
-                            // Le positionne au bout du rayon/laser
-                            this.grabbedEl.setAttribute('position', '0 0 -0.2');
-                        }
+                        this.grabbedEl = raycaster.intersectedEls[0];
+                        this.grabbedEl.removeAttribute('dynamic-body');
+                        this.el.appendChild(this.grabbedEl);
+                        this.grabbedEl.setAttribute('position', '0 0 -0.2');
                     });
 
                     this.el.addEventListener('gripup', () => {
                         if (this.grabbedEl) {
-                            // Sauvegarde sa position réelle
                             let worldPos = new THREE.Vector3();
                             this.grabbedEl.object3D.getWorldPosition(worldPos);
 
-                            // Le remet dans la scène
                             let sceneEl = document.querySelector('a-scene');
                             sceneEl.appendChild(this.grabbedEl);
                             this.grabbedEl.setAttribute('position', worldPos);
 
-                            // Lui redonne sa gravité pour qu'il tombe
                             this.grabbedEl.setAttribute('dynamic-body', '');
                             this.grabbedEl = null;
                         }
@@ -144,18 +161,22 @@
             <a-ambient-light color="#ffffff" intensity="0.5"></a-ambient-light>
             <a-directional-light position="2 6 -2" intensity="0.8"
                 cast-shadow="true"></a-directional-light>
+
+            <!-- Sol (static-body empêche de tomber à travers) -->
             <a-plane position="0 0 -4" rotation="-90 0 0" width="20" height="20" color="#7BC8A4"
                 static-body></a-plane>
+
+            <!-- Objets de décor avec collisions (static-body) -->
             <a-box position="-2 0.5 -3" rotation="0 45 0" color="#4CC3D9" static-body></a-box>
             <a-sphere position="2 1 -4" radius="1" color="#EF2D5E" static-body></a-sphere>
 
-            <!-- Objets à attraper (class="grabbable" OBLIGATOIRE pour le laser) -->
+            <!-- Objets à attraper -->
             <a-box class="grabbable" position="0 1 -2" width="0.4" height="0.4" depth="0.4"
                 color="#FFC65D" dynamic-body></a-box>
             <a-box class="grabbable" position="0.6 1 -2.2" width="0.4" height="0.4" depth="0.4"
                 color="#F16745" dynamic-body></a-box>
 
-            <!-- Cibles -->
+            <!-- Cibles (static-body) -->
             <a-entity id="targets-container">
                 <a-box class="target" position="-3 1.5 -5" width="0.8" height="0.8" depth="0.8"
                     color="#9b59b6" static-body></a-box>
@@ -163,15 +184,14 @@
                     color="#f1c40f" static-body></a-cone>
             </a-entity>
 
-            <!-- Rig Joueur et Contrôleurs VR (Utilisation de laser-controls) -->
-            <a-entity id="player" position="0 0 2">
+            <!-- Rig Joueur positionné en hauteur (3m) pour tester la chute initiale -->
+            <a-entity id="player" position="0 3 2"
+                dynamic-body="shape: sphere; radius: 0.3; mass: 70" player-physics>
                 <a-camera position="0 1.6 0"></a-camera>
 
-                <!-- Contrôleur gauche : Déplacement + Laser + Grab -->
+                <!-- Contrôleurs -->
                 <a-entity laser-controls="hand: left" joystick-movement vr-grab
                     raycaster="objects: .grabbable; far: 2; showLine: true"></a-entity>
-
-                <!-- Contrôleur droit : Rotation + Tir (bouton A) + Laser + Grab -->
                 <a-entity laser-controls="hand: right" joystick-rotation vr-shooter vr-grab
                     raycaster="objects: .grabbable; far: 2; showLine: true"></a-entity>
             </a-entity>
