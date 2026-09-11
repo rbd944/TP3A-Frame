@@ -3,17 +3,16 @@
 
     <head>
         <meta charset="UTF-8">
-        <title>TP3 - WebVR (Grabbing & Physics)</title>
-        <!-- Inclusion d'A-Frame et des composants physiques, extras et super-hands pour le grab -->
+        <title>TP3 - WebVR (Correction Joystick & Grab natif)</title>
+        <!-- Inclusion d'A-Frame et Physique uniquement (suppression de super-hands) -->
         <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
         <script
             src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v6.1.1/dist/aframe-extras.min.js"></script>
         <script
             src="https://unpkg.com/aframe-physics-system@4.0.1/dist/aframe-physics-system.min.js"></script>
-        <script src="https://unpkg.com/super-hands@3.0.3/dist/super-hands.min.js"></script>
 
         <script>
-            // Déplacement fluide avec le joystick gauche
+            // 1. Déplacement fluide avec le joystick gauche
             AFRAME.registerComponent('joystick-movement', {
                 schema: { speed: { default: 0.05 } },
                 init: function () {
@@ -43,7 +42,7 @@
                 }
             });
 
-            // Rotation fluide de la caméra avec le joystick droit
+            // 2. Rotation fluide de la caméra avec le joystick droit
             AFRAME.registerComponent('joystick-rotation', {
                 schema: { speed: { default: 2.5 } },
                 init: function () {
@@ -60,7 +59,7 @@
                 }
             });
 
-            // Composant de tir lié au bouton A de la manette droite
+            // 3. Tir lié au bouton A de la manette droite
             AFRAME.registerComponent('vr-shooter', {
                 init: function () {
                     this.el.addEventListener('abuttondown', (evt) => {
@@ -99,6 +98,46 @@
                     });
                 }
             });
+
+            // 4. Nouveau système de Grab (Saisie) 100% natif
+            AFRAME.registerComponent('vr-grab', {
+                init: function () {
+                    this.grabbedEl = null;
+
+                    // Quand on appuie sur le bouton Grip (Saisir)
+                    this.el.addEventListener('gripdown', () => {
+                        let raycaster = this.el.components.raycaster;
+                        let intersectedEls = raycaster.intersectedEls;
+
+                        if (intersectedEls.length > 0) {
+                            this.grabbedEl = intersectedEls[0];
+                            // Désactive la gravité pendant la prise en main
+                            this.grabbedEl.removeAttribute('dynamic-body');
+                            // Attache l'objet à la main
+                            this.grabbedEl.object3D.parent = this.el.object3D;
+                            this.grabbedEl.object3D.position.set(0, 0, -0.05);
+                        }
+                    });
+
+                    // Quand on relâche le bouton Grip (Lâcher)
+                    this.el.addEventListener('gripup', () => {
+                        if (this.grabbedEl) {
+                            // Calcule la position réelle dans l'espace
+                            let worldPos = new THREE.Vector3();
+                            this.grabbedEl.object3D.getWorldPosition(worldPos);
+
+                            // Détache de la main et remet dans la scène
+                            let sceneEl = document.querySelector('a-scene');
+                            this.grabbedEl.object3D.parent = sceneEl.object3D;
+                            this.grabbedEl.setAttribute('position', worldPos);
+
+                            // Réactive la gravité pour que l'objet tombe
+                            this.grabbedEl.setAttribute('dynamic-body', '');
+                            this.grabbedEl = null;
+                        }
+                    });
+                }
+            });
         </script>
     </head>
 
@@ -117,13 +156,13 @@
             <a-box position="-2 0.5 -3" rotation="0 45 0" color="#4CC3D9" static-body></a-box>
             <a-sphere position="2 1 -4" radius="1" color="#EF2D5E" static-body></a-sphere>
 
-            <!-- Objets configurés pour être saisis, suivis et soumis à la gravité -->
-            <a-box position="0 1 -2" width="0.4" height="0.4" depth="0.4" color="#FFC65D"
-                dynamic-body grabbable hoverable></a-box>
-            <a-box position="0.6 1 -2.2" width="0.4" height="0.4" depth="0.4" color="#F16745"
-                dynamic-body grabbable hoverable></a-box>
+            <!-- Objets configurés pour être saisis (ajout de class="grabbable") -->
+            <a-box class="grabbable" position="0 1 -2" width="0.4" height="0.4" depth="0.4"
+                color="#FFC65D" dynamic-body></a-box>
+            <a-box class="grabbable" position="0.6 1 -2.2" width="0.4" height="0.4" depth="0.4"
+                color="#F16745" dynamic-body></a-box>
 
-            <!-- Cibles -->
+            <!-- Cibles (class="target") -->
             <a-entity id="targets-container">
                 <a-box class="target" position="-3 1.5 -5" width="0.8" height="0.8" depth="0.8"
                     color="#9b59b6" static-body></a-box>
@@ -131,15 +170,17 @@
                     color="#f1c40f" static-body></a-cone>
             </a-entity>
 
-            <!-- Rig Joueur et Contrôleurs VR équipés de super-hands pour le Grab & Release -->
+            <!-- Rig Joueur et Contrôleurs VR -->
             <a-entity id="player" position="0 0 2">
                 <a-camera position="0 1.6 0"></a-camera>
-                <!-- Contrôleur gauche : Déplacement + Mains interactives -->
-                <a-entity oculus-touch-controls="hand: left" joystick-movement
-                    sphere-collider="objects: [grabbable]" super-hands></a-entity>
-                <!-- Contrôleur droit : Rotation joystick + Tir bouton A + Mains interactives -->
-                <a-entity oculus-touch-controls="hand: right" joystick-rotation vr-shooter
-                    sphere-collider="objects: [grabbable]" super-hands></a-entity>
+
+                <!-- Contrôleur gauche : Déplacement joystick + Grab (raycaster très court pour simuler la main) -->
+                <a-entity oculus-touch-controls="hand: left" joystick-movement vr-grab
+                    raycaster="objects: .grabbable; far: 0.15; showLine: false"></a-entity>
+
+                <!-- Contrôleur droit : Rotation joystick + Tir bouton A + Grab -->
+                <a-entity oculus-touch-controls="hand: right" joystick-rotation vr-shooter vr-grab
+                    raycaster="objects: .grabbable; far: 0.15; showLine: false"></a-entity>
             </a-entity>
 
         </a-scene>
